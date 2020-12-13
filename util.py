@@ -15,6 +15,7 @@ from sklearn.model_selection import train_test_split
 
 import scipy.io
 from scipy.signal import butter, lfilter, periodogram
+import ipdb
 
 
 def preprocess_physionet(data_path):
@@ -25,16 +26,18 @@ def preprocess_physionet(data_path):
     """
     
     # read label
-    label_df = pd.read_csv(os.path.join(data_path, 'REFERENCE-v3.csv'), header=None)
+    label_df = pd.read_csv(os.path.join(data_path, 'REFERENCE-v3.csv'), header=None).iloc[:1000,:]
     label = label_df.iloc[:,1].values
     print(Counter(label))
 
     # read data
     all_data = []
-    filenames = pd.read_csv(os.path.join(data_path, 'RECORDS'), header=None)
-    filenames = filenames.iloc[:,0].values
+    #filenames = pd.read_csv(os.path.join(data_path, 'RECORDS'), header=None)
+    #filenames = filenames.iloc[:,0].values
+    filenames = label_df[0].values
+    #ipdb.set_trace()
     print(filenames)
-    for filename in tqdm(filenames):
+    for filename in tqdm(filenames,ncols=80):
         mat = scipy.io.loadmat(os.path.join(data_path, 'training2017/{0}.mat'.format(filename)))
         mat = np.array(mat['val'])[0]
         all_data.append(mat)
@@ -108,7 +111,7 @@ def slide_and_cut(X, Y, window_size, stride, output_pid=False):
 
 def compute_beat(X):
     out = np.zeros((X.shape[0], X.shape[1], X.shape[2]))
-    for i in tqdm(range(out.shape[0]), desc="compute_beat"):
+    for i in tqdm(range(out.shape[0]), desc="compute_beat",ncols=80):
         for j in range(out.shape[1]):
             out[i, j] = np.concatenate([[0], np.abs(np.diff(X[i,j,:]))])
     return out
@@ -116,7 +119,7 @@ def compute_beat(X):
 def compute_rhythm(X, n_split):
     cnt_split = int(X.shape[2]/n_split)
     out = np.zeros((X.shape[0], X.shape[1], cnt_split))
-    for i in tqdm(range(out.shape[0]), desc="compute_rhythm"):
+    for i in tqdm(range(out.shape[0]), desc="compute_rhythm",ncols=80):
         for j in range(out.shape[1]):
             tmp_ts = X[i,j,:]
             tmp_ts_cut = np.split(tmp_ts, X.shape[2]/n_split)
@@ -127,7 +130,7 @@ def compute_rhythm(X, n_split):
 def compute_freq(X):
     out = np.zeros((X.shape[0], X.shape[1], 1))
     fs = 300
-    for i in tqdm(range(out.shape[0]), desc="compute_freq"):
+    for i in tqdm(range(out.shape[0]), desc="compute_freq",ncols=80):
         for j in range(out.shape[1]):
             _, Pxx_den = periodogram(X[i,j,:], fs)
             out[i, j, 0] = np.sum(Pxx_den)
@@ -189,15 +192,15 @@ def make_data_physionet(data_path, n_split=50, window_size=3000, stride=500):
     X_train_ml = []
     X_val_ml = []
     X_test_ml = []
-    for i in tqdm(X_train, desc="X_train_ml"):
+    for i in tqdm(X_train, desc="X_train_ml",ncols=80):
         tmp = filter_channel(i)
         X_train_ml.append(tmp)
     X_train_ml = np.array(X_train_ml)
-    for i in tqdm(X_val, desc="X_val_ml"):
+    for i in tqdm(X_val, desc="X_val_ml",ncols=80):
         tmp = filter_channel(i)
         X_val_ml.append(tmp)
     X_val_ml = np.array(X_val_ml)
-    for i in tqdm(X_test, desc="X_test_ml"):
+    for i in tqdm(X_test, desc="X_test_ml",ncols=80):
         tmp = filter_channel(i)
         X_test_ml.append(tmp)
     X_test_ml = np.array(X_test_ml)
@@ -223,6 +226,35 @@ def make_data_physionet(data_path, n_split=50, window_size=3000, stride=500):
 def make_knowledge_physionet(data_path, n_split=50):
 
     # read
+    for which in ['train', 'val', 'test']:
+        end_result = os.path.join(data_path, 'mina_K_%s_beat.bin'%which)
+        temp_result = os.path.join(data_path, 'mina_K_%s_temp.bin'%which)
+        if os.path.isfile(end_result) and os.path.isfile(temp_result): continue
+
+        fin = open(os.path.join(data_path, 'mina_X_%s.bin'%which), 'rb')
+        X = np.load(fin)
+        fin.close()
+        K_beat = compute_beat(X)
+        K_rhythm = compute_rhythm(X, n_split)
+        K_freq = compute_freq(X)
+
+        fout = open(end_result, 'wb')
+        np.save(fout, K_beat)
+        fout.close()
+
+
+        res = {"K_%s_rhythm"%which: K_rhythm, "K_%s_freq"%which: K_freq}
+        with open(temp_result, 'wb') as fout:
+            dill.dump(res, fout)
+    res = {}
+    for which in ['train', 'val', 'test']:
+        temp_result = os.path.join(data_path, 'mina_K_%s_temp.bin' % which)
+        with open(temp_result, 'rb') as fin:
+            res.update(dill.load(fin))
+    with open(os.path.join(data_path, 'mina_knowledge.pkl'), 'wb') as fout:
+        dill.dump(res, fout)
+    return
+
     fin = open(os.path.join(data_path, 'mina_X_train.bin'), 'rb')
     X_train = np.load(fin)
     fin.close()

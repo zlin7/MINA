@@ -10,10 +10,10 @@ if __name__ == "__main__":
     """
 
     # prepare data
-    data_path = '../../data/challenge2017/'
-    # preprocess_physionet(data_path) # uncomment if you don't have the raw data, omit this if you have challenge2017.pkl
-    # make_data_physionet(data_path) # uncomment if you don't have the preprocessed data
-    # make_knowledge_physionet(data_path) # uncomment if you don't have the preprocessed knowledge
+    data_path = '../data/challenge2017/'
+    #preprocess_physionet(data_path) # uncomment if you don't have the raw data, omit this if you have challenge2017.pkl
+    #make_data_physionet(data_path) # uncomment if you don't have the preprocessed data
+    #make_knowledge_physionet(data_path) # uncomment if you don't have the preprocessed knowledge
     
     # run
     for i_run in range(1):

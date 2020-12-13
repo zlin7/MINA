@@ -204,7 +204,7 @@ def train(model, optimizer, loss_func, epoch, batch_size,
     batch_start_idx = 0
     batch_end_idx = 0
     loss_all = []
-    for _ in tqdm(range(n_train//batch_size+1), desc="train"):
+    for _ in tqdm(range(n_train//batch_size+1), desc="train",ncols=80):
     # while batch_end_idx < n_train:
         # print('.', end="")
         batch_end_idx = batch_end_idx + batch_size
@@ -281,7 +281,7 @@ def test(model, batch_size,
     
     batch_start_idx = 0
     batch_end_idx = 0
-    for _ in tqdm(range(n_test//batch_size+1), desc="test"):
+    for _ in tqdm(range(n_test//batch_size+1), desc="test",ncols=80):
     # while batch_end_idx < n_test:
         # print('.', end="")
         batch_end_idx = batch_end_idx + batch_size
