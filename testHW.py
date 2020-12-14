@@ -21,172 +21,14 @@ import sys, os
 from shutil import copyfile
 import ipdb
 
+import model as new_model
+import dataloader as dld
+import old_model as old_model
+from importlib import reload
+reload(new_model); reload(old_model); reload(dld)
 
-class Net(nn.Module):
-    def __init__(self, n_channel, n_dim, n_split):
-        super(Net, self).__init__()
-
-        self.n_channel = n_channel
-        self.n_dim = n_dim
-        self.n_split = n_split
-        self.n_class = 2
-        self.base_net_0 = BaseNet(self.n_dim, self.n_split)
-        self.base_net_1 = BaseNet(self.n_dim, self.n_split)
-        self.base_net_2 = BaseNet(self.n_dim, self.n_split)
-        self.base_net_3 = BaseNet(self.n_dim, self.n_split)
-
-        ### attention
-        self.out_size = 8
-        self.att_channel_dim = 2
-        self.W_att_channel = nn.Parameter(torch.randn(self.out_size + 1, self.att_channel_dim))
-        self.v_att_channel = nn.Parameter(torch.randn(self.att_channel_dim, 1))
-
-        ### fc
-        self.fc = nn.Linear(self.out_size, self.n_class)
-
-    def forward(self, x_0, x_1, x_2, x_3,
-                k_beat_0, k_beat_1, k_beat_2, k_beat_3,
-                k_rhythm_0, k_rhythm_1, k_rhythm_2, k_rhythm_3,
-                k_freq):
-        x_0, alpha_0, beta_0 = self.base_net_0(x_0, k_beat_0, k_rhythm_0)
-        x_1, alpha_1, beta_1 = self.base_net_1(x_1, k_beat_1, k_rhythm_1)
-        x_2, alpha_2, beta_2 = self.base_net_2(x_2, k_beat_2, k_rhythm_2)
-        x_3, alpha_3, beta_3 = self.base_net_3(x_3, k_beat_3, k_rhythm_3)
-
-        x = torch.stack([x_0, x_1, x_2, x_3], 1)
-
-        # ############################################
-        # ### attention on channel
-        # ############################################
-        k_freq = k_freq.permute(1, 0, 2)
-
-        tmp_x = torch.cat((x, k_freq), dim=-1)
-        e = torch.matmul(tmp_x, self.W_att_channel)
-        e = torch.matmul(torch.tanh(e), self.v_att_channel)
-        n1 = torch.exp(e)
-        n2 = torch.sum(torch.exp(e), 1, keepdim=True)
-        gama = torch.div(n1, n2)
-        x = torch.sum(torch.mul(gama, x), 1)
-
-        ############################################
-        ### fc
-        ############################################
-        x = F.softmax(self.fc(x), 1)
-
-        ############################################
-        ### return
-        ############################################
-
-        att_dic = {"alpha_0": alpha_0, "beta_0": beta_0,
-                   "alpha_1": alpha_1, "beta_1": beta_1,
-                   "alpha_2": alpha_2, "beta_2": beta_2,
-                   "alpha_3": alpha_3, "beta_3": beta_3,
-                   "gama": gama}
-
-        return x, att_dic
-
-
-class BaseNet(nn.Module):
-    def __init__(self, n_dim, n_split):
-        super(BaseNet, self).__init__()
-
-        self.n_dim = n_dim
-        self.n_split = n_split
-        self.n_seg = int(n_dim / n_split)
-
-        ### Input: (batch size, number of channels, length of signal sequence)
-        self.conv_out_channels = 64
-        self.conv_kernel_size = 32
-        self.conv_stride = 2
-        self.conv = nn.Conv1d(in_channels=1,
-                              out_channels=self.conv_out_channels,
-                              kernel_size=self.conv_kernel_size,
-                              stride=self.conv_stride)
-        self.conv_k = nn.Conv1d(in_channels=1,
-                                out_channels=1,
-                                kernel_size=self.conv_kernel_size,
-                                stride=self.conv_stride)
-        self.att_cnn_dim = 8
-        self.W_att_cnn = nn.Parameter(torch.randn(self.conv_out_channels + 1, self.att_cnn_dim))
-        self.v_att_cnn = nn.Parameter(torch.randn(self.att_cnn_dim, 1))
-
-        ### Input: (batch size, length of signal sequence, input_size)
-        self.rnn_hidden_size = 32
-        self.lstm = nn.LSTM(input_size=(self.conv_out_channels),
-                            hidden_size=self.rnn_hidden_size,
-                            num_layers=1, batch_first=True, bidirectional=True)
-        self.att_rnn_dim = 8
-        self.W_att_rnn = nn.Parameter(torch.randn(2 * self.rnn_hidden_size + 1, self.att_rnn_dim))
-        self.v_att_rnn = nn.Parameter(torch.randn(self.att_rnn_dim, 1))
-
-        ### fc
-        self.do = nn.Dropout(p=0.5)
-        self.out_size = 8
-        self.fc = nn.Linear(2 * self.rnn_hidden_size, self.out_size)
-
-    def forward(self, x, k_beat, k_rhythm):
-        self.batch_size = x.size()[0]
-
-        ############################################
-        ### reshape
-        ############################################
-        # print('orignial x:', x.size())
-        x = x.view(-1, self.n_split)
-        x = x.unsqueeze(1)
-
-        k_beat = k_beat.view(-1, self.n_split)
-        k_beat = k_beat.unsqueeze(1)
-
-        ############################################
-        ### conv
-        ############################################
-        x = F.relu(self.conv(x))
-
-        k_beat = F.relu(self.conv_k(k_beat))
-
-        ############################################
-        ### attention conv
-        ############################################
-        x = x.permute(0, 2, 1)
-        k_beat = k_beat.permute(0, 2, 1)
-        tmp_x = torch.cat((x, k_beat), dim=-1)
-        e = torch.matmul(tmp_x, self.W_att_cnn)
-        e = torch.matmul(torch.tanh(e), self.v_att_cnn)
-        n1 = torch.exp(e)
-        n2 = torch.sum(torch.exp(e), 1, keepdim=True)
-        alpha = torch.div(n1, n2)
-        x = torch.sum(torch.mul(alpha, x), 1)
-
-        ############################################
-        ### reshape for rnn
-        ############################################
-        x = x.view(self.batch_size, self.n_seg, -1)
-
-        ############################################
-        ### rnn
-        ############################################
-
-        k_rhythm = k_rhythm.unsqueeze(-1)
-        o, (ht, ct) = self.lstm(x)
-        tmp_o = torch.cat((o, k_rhythm), dim=-1)
-        e = torch.matmul(tmp_o, self.W_att_rnn)
-        e = torch.matmul(torch.tanh(e), self.v_att_rnn)
-        n1 = torch.exp(e)
-        n2 = torch.sum(torch.exp(e), 1, keepdim=True)
-        beta = torch.div(n1, n2)
-        x = torch.sum(torch.mul(beta, o), 1)
-
-        ############################################
-        ### fc
-        ############################################
-        x = F.relu(self.fc(x))
-        x = self.do(x)
-
-        return x, alpha, beta
-
-
-def train(model, optimizer, loss_func, epoch, batch_size,
-          X_train, Y_train, K_train_beat, K_train_rhythm, K_train_freq,
+def train(model, optimizer, loss_func, epoch,
+          dataloader,
           log_file):
     """
     X_train: (n_channel, n_sample, n_dim)
@@ -198,64 +40,30 @@ def train(model, optimizer, loss_func, epoch, batch_size,
     """
     model.train()
 
-    n_train = len(Y_train)
-
     pred_all = []
-    batch_start_idx = 0
-    batch_end_idx = 0
     loss_all = []
-    for _ in tqdm(range(n_train // batch_size + 1), desc="train", ncols=80):
-        # while batch_end_idx < n_train:
-        # print('.', end="")
-        batch_end_idx = batch_end_idx + batch_size
-        if batch_end_idx >= n_train:
-            batch_end_idx = n_train
+    Y_train = []
+    for (X, K_beat, K_rhythm, K_freq), Y in tqdm(dataloader, desc='train', ncols=80):
+        X, K_beat, K_rhythm, K_freq = X.cuda(), K_beat.cuda(), K_rhythm.cuda(), K_freq.cuda()
+        Y = Y.cuda()
 
-        ### input data
-        batch_input_0 = Variable(torch.FloatTensor(X_train[0, batch_start_idx: batch_end_idx, :])).cuda()
-        batch_input_1 = Variable(torch.FloatTensor(X_train[1, batch_start_idx: batch_end_idx, :])).cuda()
-        batch_input_2 = Variable(torch.FloatTensor(X_train[2, batch_start_idx: batch_end_idx, :])).cuda()
-        batch_input_3 = Variable(torch.FloatTensor(X_train[3, batch_start_idx: batch_end_idx, :])).cuda()
-
-        ### input K_beat
-        batch_K_beat_0 = Variable(torch.FloatTensor(K_train_beat[0, batch_start_idx: batch_end_idx, :])).cuda()
-        batch_K_beat_1 = Variable(torch.FloatTensor(K_train_beat[1, batch_start_idx: batch_end_idx, :])).cuda()
-        batch_K_beat_2 = Variable(torch.FloatTensor(K_train_beat[2, batch_start_idx: batch_end_idx, :])).cuda()
-        batch_K_beat_3 = Variable(torch.FloatTensor(K_train_beat[3, batch_start_idx: batch_end_idx, :])).cuda()
-
-        ### input K_rhythm
-        batch_K_rhythm_0 = Variable(torch.FloatTensor(K_train_rhythm[0, batch_start_idx: batch_end_idx, :])).cuda()
-        batch_K_rhythm_1 = Variable(torch.FloatTensor(K_train_rhythm[1, batch_start_idx: batch_end_idx, :])).cuda()
-        batch_K_rhythm_2 = Variable(torch.FloatTensor(K_train_rhythm[2, batch_start_idx: batch_end_idx, :])).cuda()
-        batch_K_rhythm_3 = Variable(torch.FloatTensor(K_train_rhythm[3, batch_start_idx: batch_end_idx, :])).cuda()
-
-        ### input K_freq
-        batch_K_freq = Variable(torch.FloatTensor(K_train_freq[:, batch_start_idx: batch_end_idx, :])).cuda()
-
-        ### gt
-        batch_gt = Variable(torch.LongTensor(Y_train[batch_start_idx: batch_end_idx])).cuda()
-
-        pred, _ = model(batch_input_0, batch_input_1, batch_input_2, batch_input_3,
-                        batch_K_beat_0, batch_K_beat_1, batch_K_beat_2, batch_K_beat_3,
-                        batch_K_rhythm_0, batch_K_rhythm_1, batch_K_rhythm_2, batch_K_rhythm_3,
-                        batch_K_freq)
+        pred, _ = model.forward_(X, K_beat, K_rhythm, K_freq)
 
         pred_all.append(pred.cpu().data.numpy())
-        # print(pred, batch_gt)
+        Y_train.append(Y.cpu().data.numpy())
 
-        loss = loss_func(pred, batch_gt)
+        loss = loss_func(pred, Y)
         loss_all.append(loss.cpu().data.numpy())
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-
-        batch_start_idx = batch_start_idx + batch_size
 
     loss_res = np.mean(loss_all)
     print('epoch {0} '.format(epoch))
     print('loss ', np.mean(loss_all))
     print('train | ', end='')
     pred_all = np.concatenate(pred_all, axis=0)
+    Y_train = np.concatenate(Y_train, axis=0)
     # print(Y_train.shape, pred_all.shape)
     res = evaluate(Y_train, pred_all)
     res.append(loss_res)
@@ -268,63 +76,29 @@ def train(model, optimizer, loss_func, epoch, batch_size,
     return res
 
 
-def test(model, batch_size,
-         X_test, Y_test, K_test_beat, K_test_rhythm, K_test_freq,
+def test(model,
+         dataloader,
          log_file):
     model.eval()
 
-    n_test = len(Y_test)
-
     pred_all = []
     att_dic_all = []
+    Y_test = []
+    for (X, K_beat, K_rhythm, K_freq), Y in tqdm(dataloader, desc='test', ncols=80):
+        X, K_beat, K_rhythm, K_freq = X.cuda(), K_beat.cuda(), K_rhythm.cuda(), K_freq.cuda()
+        Y = Y.cuda()
 
-    batch_start_idx = 0
-    batch_end_idx = 0
-    for _ in tqdm(range(n_test // batch_size + 1), desc="test", ncols=80):
-        # while batch_end_idx < n_test:
-        # print('.', end="")
-        batch_end_idx = batch_end_idx + batch_size
-        if batch_end_idx >= n_test:
-            batch_end_idx = n_test
-
-        ### input data
-        batch_input_0 = Variable(torch.FloatTensor(X_test[0, batch_start_idx: batch_end_idx, :])).cuda()
-        batch_input_1 = Variable(torch.FloatTensor(X_test[1, batch_start_idx: batch_end_idx, :])).cuda()
-        batch_input_2 = Variable(torch.FloatTensor(X_test[2, batch_start_idx: batch_end_idx, :])).cuda()
-        batch_input_3 = Variable(torch.FloatTensor(X_test[3, batch_start_idx: batch_end_idx, :])).cuda()
-
-        ### input K_beat
-        batch_K_beat_0 = Variable(torch.FloatTensor(K_test_beat[0, batch_start_idx: batch_end_idx, :])).cuda()
-        batch_K_beat_1 = Variable(torch.FloatTensor(K_test_beat[1, batch_start_idx: batch_end_idx, :])).cuda()
-        batch_K_beat_2 = Variable(torch.FloatTensor(K_test_beat[2, batch_start_idx: batch_end_idx, :])).cuda()
-        batch_K_beat_3 = Variable(torch.FloatTensor(K_test_beat[3, batch_start_idx: batch_end_idx, :])).cuda()
-
-        ### input K_rhythm
-        batch_K_rhythm_0 = Variable(torch.FloatTensor(K_test_rhythm[0, batch_start_idx: batch_end_idx, :])).cuda()
-        batch_K_rhythm_1 = Variable(torch.FloatTensor(K_test_rhythm[1, batch_start_idx: batch_end_idx, :])).cuda()
-        batch_K_rhythm_2 = Variable(torch.FloatTensor(K_test_rhythm[2, batch_start_idx: batch_end_idx, :])).cuda()
-        batch_K_rhythm_3 = Variable(torch.FloatTensor(K_test_rhythm[3, batch_start_idx: batch_end_idx, :])).cuda()
-
-        ### input K_freq
-        batch_K_freq = Variable(torch.FloatTensor(K_test_freq[:, batch_start_idx: batch_end_idx, :])).cuda()
-
-        ### gt
-        batch_gt = Variable(torch.LongTensor(Y_test[batch_start_idx: batch_end_idx])).cuda()
-
-        pred, att_dic = model(batch_input_0, batch_input_1, batch_input_2, batch_input_3,
-                              batch_K_beat_0, batch_K_beat_1, batch_K_beat_2, batch_K_beat_3,
-                              batch_K_rhythm_0, batch_K_rhythm_1, batch_K_rhythm_2, batch_K_rhythm_3,
-                              batch_K_freq)
+        pred, att_dic = model.forward_(X, K_beat, K_rhythm, K_freq)
 
         for k, v in att_dic.items():
             att_dic[k] = v.cpu().data.numpy()
         att_dic_all.append(att_dic)
         pred_all.append(pred.cpu().data.numpy())
-
-        batch_start_idx = batch_start_idx + batch_size
+        Y_test.append(Y.cpu().data.numpy())
 
     print('test | ', end='')
     pred_all = np.concatenate(pred_all, axis=0)
+    Y_test = np.concatenate(Y_test, axis=0)
     res = evaluate(Y_test, pred_all)
     res.append(pred_all)
 
@@ -391,29 +165,58 @@ def load_data(data_path=r"G:\MINA\data\challenge2017"):
     print('load data done!')
     return X_train, X_test, Y_train, Y_test, K_train_beat, K_test_beat, K_train_rhythm, K_test_rhythm, K_train_freq, K_test_freq
 
+def make_merged_data(src=r"G:\MINA\data\challenge2017\1000_cached_data",
+                     dst=None, seed=7):
+    from sklearn.model_selection import train_test_split
+    import pandas as pd
+    dst = dst or "%s_permuted%d"%(src, seed)
+    dst_train = os.path.join(dst, 'train.pkl')
+    dst_test =  os.path.join(dst, 'test.pkl')
+    if not (os.path.isfile(dst_train) and os.path.isfile(dst_test)):
+        X, _, Y, _, K_beat, _, K_rhythm, _, K_freq, _ = load_data(src)
+        train_idx, test_idx = train_test_split(np.arange(X.shape[1]), train_size=0.8, random_state=seed)
 
-def run(data_path):
-    n_epoch = 2#00
+        train_data = {"X": X[:, train_idx,:], "Y":Y[train_idx],
+                      "K_beat": K_beat[:, train_idx, :], "K_rhythm":K_rhythm[:, train_idx, :], "K_freq":K_freq[:, train_idx,:]}
+        test_data = {"X": X[:, test_idx,:], "Y": Y[test_idx],
+                      "K_beat": K_beat[:, test_idx,:], "K_rhythm": K_rhythm[:, test_idx,:], "K_freq": K_freq[:, test_idx,:]}
+        print([train_data[k].shape for k in train_data])
+        print([test_data[k].shape for k in test_data])
+        if not os.path.isdir(dst): os.makedirs(dst)
+        pd.to_pickle(train_data, dst_train)
+        pd.to_pickle(test_data, dst_test)
+    return pd.read_pickle(dst_train), pd.read_pickle(dst_test)
+
+def load_permuted_data(data_path=r'G:\MINA\data\challenge2017\1000_cached_data_permuted7', which='train'):
+    import pandas as pd
+    d = pd.read_pickle(os.path.join(data_path, '%s.pkl'%which))
+    return d['X'], d['Y'], d['K_beat'], d['K_rhythm'], d['K_freq']
+
+def run_exp(data_path):
+    #n_epoch = 200
+    n_epoch=5
     lr = 0.003
     n_split = 50
 
     ##################################################################
     ### par
     ##################################################################
-    run_id = 'mina_{0}'.format(strftime("%Y-%m-%d-%H-%M-%S", localtime()))
+    #run_id = 'mina_{0}'.format(strftime("%Y-%m-%d-%H-%M-%S", localtime()))
+    run_id = 'test_run'
     directory = 'res/{0}'.format(run_id)
-    try:
-        os.stat('res/')
-    except:
-        os.mkdir('res/')
-    try:
-        os.stat(directory)
-    except:
-        os.mkdir(directory)
+    if not os.path.isdir(directory):os.makedirs(directory)
+    #try:
+    #    os.stat('res/')
+    #except:
+    #    os.mkdir('res/')
+    #try:
+    #    os.stat(directory)
+    #except:
+    #    os.mkdir(directory)
 
     log_file = '{0}/log.txt'.format(directory)
-    model_file = 'testHW.py'
-    copyfile(model_file, '{0}/{1}'.format(directory, model_file))
+    #model_file = 'testHW.py'
+    #copyfile(model_file, '{0}/{1}'.format(directory, model_file))
 
     n_dim = 3000
     batch_size = 128
@@ -424,18 +227,20 @@ def run(data_path):
     ##################################################################
     ### read data
     ##################################################################
-    X_train, X_test, Y_train, Y_test, K_train_beat, K_test_beat, K_train_rhythm, K_test_rhythm, K_train_freq, K_test_freq = load_data(data_path)
-    ipdb.set_trace()
+    #X_train, X_test, Y_train, Y_test, K_train_beat, K_test_beat, K_train_rhythm, K_test_rhythm, K_train_freq, K_test_freq = load_data(data_path)
+    train_loader = dld.get_dataloader(data_path, 'train')
+    test_loader = dld.get_dataloader(data_path, 'test')
     ##################################################################
     ### train
     ##################################################################
 
-    n_channel = X_train.shape[0]
+    n_channel = train_loader.dataset[0][0][0].shape[0]
     print('n_channel:', n_channel)
 
     torch.cuda.manual_seed(0)
 
-    model = Net(n_channel, n_dim, n_split)
+    #model = old_model.Net(n_channel, n_dim, n_split)
+    model = new_model.NetFreq(n_channel, n_dim, n_split)
     model.cuda()
 
     optimizer = optim.Adam(model.parameters(), lr=lr)
@@ -445,17 +250,17 @@ def run(data_path):
     test_res_list = []
     test_att_list = []
     for epoch in range(n_epoch):
-        tmp_train = train(model, optimizer, loss_func, epoch, batch_size,
-                          X_train, Y_train, K_train_beat, K_train_rhythm, K_train_freq,
+        tmp_train = train(model, optimizer, loss_func, epoch,
+                          train_loader,
                           log_file)
-        tmp_test, tmp_att_test = test(model, batch_size,
-                                      X_test, Y_test, K_test_beat, K_test_rhythm, K_test_freq,
+        tmp_test, tmp_att_test = test(model,
+                                      test_loader,
                                       log_file)
 
         train_res_list.append(tmp_train)
         test_res_list.append(tmp_test)
         test_att_list.append(tmp_att_test)
-        torch.save(model, '{0}/model_{1}.pt'.format(directory, epoch))
+        #torch.save(model, '{0}/model_{1}.pt'.format(directory, epoch))
 
     ##################################################################
     ### save results
@@ -485,4 +290,6 @@ def run(data_path):
 
 
 if __name__ == '__main__':
-    run('../data/challenge2017/')
+    #run_exp('../data/challenge2017/')
+    run_exp('../data/challenge2017/1000_cached_data_permuted7')
+    #make_merged_data()

@@ -2,23 +2,6 @@ from __future__ import print_function
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.optim as optim
-from torch.autograd import Variable
-from torch.utils.data import DataLoader, TensorDataset
-from torch.nn.utils.rnn import pack_padded_sequence
-from tqdm import tqdm
-
-import numpy as np
-import pickle as dill
-from collections import Counter
-from time import localtime, strftime
-import random
-
-import matplotlib.pyplot as plt
-import random
-from util import preprocess_physionet, make_data_physionet, make_knowledge_physionet, evaluate
-import sys, os
-from shutil import copyfile
 import ipdb
 
 class AttnBeat(nn.Module):
@@ -155,6 +138,8 @@ class NetFreq(nn.Module):
                              k_freq)
 
     def forward_(self, x, k_beats, k_rhythms, k_freq):
+        #x, k_beats, k_rhythms, k_freq = x.permute(1,0,2), k_beats.permute(1,0,2), k_rhythms.permute(1,0,2), k_freq.permute(1,0,2)
+
         new_x = [None for _ in range(self.n_channels)]
         att_dic = {}
         for i in range(self.n_channels):
