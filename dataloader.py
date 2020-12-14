@@ -10,6 +10,9 @@ import numpy as np
 class ECGDataset(Dataset):
 
     def __init__(self, data_dict):
+        """
+        TODO: init the Dataset instance
+        """
         ### BEGIN SOLUTION
         self.X, self.Y, self.K_beat, self.K_thythm, self.K_freq = data_dict['X'], data_dict['Y'], data_dict['K_beat'], data_dict['K_rhythm'], data_dict['K_freq']
         ### END SOLUTION
@@ -23,42 +26,52 @@ class ECGDataset(Dataset):
         return len(self.Y)
         ### END SOLUTION
 
-    def __getitem__(self, index):
+    def __getitem__(self, i):
         """
         TODO: Generates one sample of data
+            return the ((X, K_beat, K_rhythm, K_freq), Y) for the i-th
         """
 
         ### BEGIN SOLUTION
-        return (self.X[:, index, :],
-                self.K_beat[:, index, :],
-                self.K_thythm[:, index, :],
-                self.K_freq[:, index, :]), self.Y[index]
-        return (torch.tensor(self.X[:, index, :]),
-                torch.tensor(self.K_beat[:, index, :]),
-                torch.tensor(self.K_thythm[:, index, :]),
-                torch.tensor(self.K_freq[:, index, :])), torch.tensor(self.Y[index])
+        return (self.X[:, i, :], self.K_beat[:, i, :], self.K_thythm[:, i, :], self.K_freq[:, i, :]), self.Y[i]
         ### END SOLUTION
-
-
-from torch.utils.data import DataLoader
-
 
 def load_data(dataset, batch_size=128):
     """
-    TODO: load the `ECGDataset` it to dataloader. Set batchsize to 32.
+
+    Note that since the data has already been shuffled, we set shuffle=False
     """
-    ### BEGIN SOLUTION
     def my_collate(batch):
+        """
+        :param batch: this is essentially [dataset[i] for i in [...]]
+        batch[i] should be ((Xi, Ki_beat, Ki_rhythm, Ki_freq), Yi)
+        TODO: write a collate function such that it outputs ((X, K_beat, K_rhythm, K_freq), Y)
+            each output variable is a batched version of what's in the input *batch*
+            For each output variable - it should be either float tensor or long tensor (for Y). If applicable, channel dim precedes batch dim
+            e.g. the shape of each Xi is (# channels, n). In the output, X should be of shape (batch_size, # channels, n)
+        """
+        ### BEGIN SOLUTION
         X = torch.tensor([[_x[0][0][c] for _x in batch] for c in range(4)], dtype=torch.float)
         K_beat = torch.tensor([[_x[0][1][c] for _x in batch] for c in range(4)], dtype=torch.float)
         K_rhythm = torch.tensor([[_x[0][2][c] for _x in batch] for c in range(4)], dtype=torch.float)
         K_freq = torch.tensor([[_x[0][3][c] for _x in batch] for c in range(4)], dtype=torch.float)
         Y = torch.tensor([_x[1] for _x in batch], dtype=torch.long)
+        ### BEGIN SOLUTION
         return (X, K_beat, K_rhythm, K_freq), Y
+
     return torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False, collate_fn=my_collate)
-    ### END SOLUTION
 
 
-def get_dataloader(data_path=r'G:\MINA\data\challenge2017\1000_cached_data_permuted7', which='train', batch_size=128):
-    dataset = ECGDataset(pd.read_pickle(os.path.join(data_path, '%s.pkl'%which)))
-    return load_data(dataset, batch_size=batch_size)
+def main(data_path=None):
+    data_path = r'G:\MINA\data\challenge2017\100_cached_data_permuted7'
+    train_dict = pd.read_pickle(os.path.join(data_path, 'train.pkl'))
+    test_dict = pd.read_pickle(os.path.join(data_path, 'test.pkl'))
+    print(f"There are {len(train_dict['Y'])} training data, {len(test_dict['Y'])} test data")
+    print(f"Shape of X: {train_dict['X'][:, 0,:].shape} = (#channels, n)")
+    print(f"Shape of beat feature: {train_dict['K_beat'][:, 0, :].shape} = (#channels, n)")
+    print(f"Shape of rhythm feature: {train_dict['K_rhythm'][:, 0, :].shape} = (#channels, M)")
+    print(f"Shape of frequency feature: {train_dict['K_freq'][:, 0, :].shape} = (#channels, 1)")
+
+    train_loader = load_data(ECGDataset(train_dict))
+    test_loader = load_data(ECGDataset(test_dict))
+    return train_loader, test_loader

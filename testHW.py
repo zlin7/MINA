@@ -1,25 +1,13 @@
 from __future__ import print_function
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
-from torch.autograd import Variable
-from torch.utils.data import DataLoader, TensorDataset
-from torch.nn.utils.rnn import pack_padded_sequence
 from tqdm import tqdm
 
 import numpy as np
 import pickle as dill
 from collections import Counter
-from time import localtime, strftime
-import random
-
-import matplotlib.pyplot as plt
-import random
 from util import preprocess_physionet, make_data_physionet, make_knowledge_physionet, evaluate
-import sys, os
-from shutil import copyfile
-import ipdb
+import os
 
 import model as new_model
 import dataloader as dld
@@ -27,9 +15,7 @@ import old_model as old_model
 from importlib import reload
 reload(new_model); reload(old_model); reload(dld)
 
-def train(model, optimizer, loss_func, epoch,
-          dataloader,
-          log_file):
+def train(model, optimizer, loss_func, epoch, dataloader):
     """
     X_train: (n_channel, n_sample, n_dim)
     Y_train: (n_sample,)
@@ -64,21 +50,14 @@ def train(model, optimizer, loss_func, epoch,
     print('train | ', end='')
     pred_all = np.concatenate(pred_all, axis=0)
     Y_train = np.concatenate(Y_train, axis=0)
-    # print(Y_train.shape, pred_all.shape)
     res = evaluate(Y_train, pred_all)
     res.append(loss_res)
     res.append(pred_all)
 
-    with open(log_file, 'a') as fout:
-        print('epoch {0} '.format(epoch), 'train | ', res, file=fout)
-        print('loss_all ', np.mean(loss_all), file=fout)
-
     return res
 
 
-def test(model,
-         dataloader,
-         log_file):
+def test(model, dataloader):
     model.eval()
 
     pred_all = []
@@ -101,9 +80,6 @@ def test(model,
     Y_test = np.concatenate(Y_test, axis=0)
     res = evaluate(Y_test, pred_all)
     res.append(pred_all)
-
-    with open(log_file, 'a') as fout:
-        print('test | ', res, file=fout)
 
     return res, att_dic_all
 
@@ -197,39 +173,21 @@ def run_exp(data_path):
     n_epoch=5
     lr = 0.003
     n_split = 50
+    n_dim = 3000
+    batch_size = 128
 
     ##################################################################
     ### par
     ##################################################################
-    #run_id = 'mina_{0}'.format(strftime("%Y-%m-%d-%H-%M-%S", localtime()))
     run_id = 'test_run'
     directory = 'res/{0}'.format(run_id)
     if not os.path.isdir(directory):os.makedirs(directory)
-    #try:
-    #    os.stat('res/')
-    #except:
-    #    os.mkdir('res/')
-    #try:
-    #    os.stat(directory)
-    #except:
-    #    os.mkdir(directory)
 
-    log_file = '{0}/log.txt'.format(directory)
-    #model_file = 'testHW.py'
-    #copyfile(model_file, '{0}/{1}'.format(directory, model_file))
-
-    n_dim = 3000
-    batch_size = 128
-
-    with open(log_file, 'a') as fout:
-        print(run_id, file=fout)
 
     ##################################################################
     ### read data
     ##################################################################
-    #X_train, X_test, Y_train, Y_test, K_train_beat, K_test_beat, K_train_rhythm, K_test_rhythm, K_train_freq, K_test_freq = load_data(data_path)
-    train_loader = dld.get_dataloader(data_path, 'train')
-    test_loader = dld.get_dataloader(data_path, 'test')
+    train_loader, test_loader = dld.main(data_path)
     ##################################################################
     ### train
     ##################################################################
@@ -239,7 +197,6 @@ def run_exp(data_path):
 
     torch.cuda.manual_seed(0)
 
-    #model = old_model.Net(n_channel, n_dim, n_split)
     model = new_model.NetFreq(n_channel, n_dim, n_split)
     model.cuda()
 
@@ -250,17 +207,12 @@ def run_exp(data_path):
     test_res_list = []
     test_att_list = []
     for epoch in range(n_epoch):
-        tmp_train = train(model, optimizer, loss_func, epoch,
-                          train_loader,
-                          log_file)
-        tmp_test, tmp_att_test = test(model,
-                                      test_loader,
-                                      log_file)
+        tmp_train = train(model, optimizer, loss_func, epoch, train_loader)
+        tmp_test, tmp_att_test = test(model, test_loader)
 
         train_res_list.append(tmp_train)
         test_res_list.append(tmp_test)
         test_att_list.append(tmp_att_test)
-        #torch.save(model, '{0}/model_{1}.pt'.format(directory, epoch))
 
     ##################################################################
     ### save results
@@ -291,5 +243,5 @@ def run_exp(data_path):
 
 if __name__ == '__main__':
     #run_exp('../data/challenge2017/')
-    run_exp('../data/challenge2017/1000_cached_data_permuted7')
+    run_exp('../data/challenge2017/100_cached_data_permuted7')
     #make_merged_data()
