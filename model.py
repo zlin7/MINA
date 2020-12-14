@@ -8,13 +8,24 @@ class AttnBeat(nn.Module):
     #Attention for the CNN step/ beat level/local information
     def __init__(self, n=3000, T=50,
                  conv_out_channels=64):
+        """
+        :param n: size of each 10-second-data
+        :param T: size of each smaller segment used to capture local information in the CNN stage
+        :param conv_out_channels: also called number of filters
+        TODO: We will define a network that does two things. Specifically:
+            1. use one 1-D convolutional layer to capture local informatoin, on x and k_beat (see forward())
+                conv: The kernel size should be set to 32, and the number of filters should be set to *conv_out_channels*. Stride should be *conv_stride*
+                conv_k: same as conv, except that it has only 1 filter instead of *conv_out_channels*
+            2. an attention mechanism to aggregate the convolution outputs. Specifically:
+                att_W: a Linear layer of shape (conv_out_channels+1, *att_cnn_dim*), without bias
+                att_v: a Linear layer of shape (*att_cnn_dim*, 1), without bias
+        """
         super(AttnBeat, self).__init__()
         self.n, self.M, self.T = n, int(n/T), T
-
-        ### Input: (batch size, number of channels, length of signal sequence)
         self.conv_out_channels = conv_out_channels
         self.conv_kernel_size = 32
         self.conv_stride = 2
+        ### BEGIN SOLUTION
         self.conv = nn.Conv1d(in_channels=1,
                               out_channels=self.conv_out_channels,
                               kernel_size=self.conv_kernel_size,
@@ -24,38 +35,56 @@ class AttnBeat(nn.Module):
                                 out_channels=1,
                                 kernel_size=self.conv_kernel_size,
                                 stride=self.conv_stride)
+        ### END SOLUTION
 
         self.att_cnn_dim = 8
-        self.W_att_cnn = nn.Parameter(torch.randn(self.conv_out_channels + 1, self.att_cnn_dim))
-        self.v_att_cnn = nn.Parameter(torch.randn(self.att_cnn_dim, 1))
+        ### BEGIN SOLUTION
+        self.att_W = nn.Linear(self.conv_out_channels + 1, self.att_cnn_dim, bias=False)
+        self.att_v = nn.Linear(self.att_cnn_dim, 1, bias=False)
+        ### END SOLUTION
+        self.init()
+
+    def init(self):
+        nn.init.normal_(self.att_W.weight)
+        nn.init.normal_(self.att_v.weight)
 
     def forward(self, x, k_beat):
-        ##self.batch_size = x.size()[0]
-
-        ############################################
-        ### reshape
-        ############################################
+        """
+        :param x: shape (batch, n)
+        :param k_beat: shape (batch, n)
+        :return:
+            x: shape (batch * M, T)
+            alpha: shape (batch * M,
+        TODO:
+            reshape the data - convert x/k_beat of shape (batch, n) to (batch * M, 1, T), where n = MT
+            apply convolution on x and k_beat
+                pass the reshaped x through self.conv, and then ReLU
+                pass the reshaped k_beat through self.conv_k, and then ReLU
+                concatenate the conv output of x and k_beat together
+            (at this step, you might need to swap axes to align the dimensions depending on how you defined the layers)
+            pass the concatenated output trough the learnable Linear transforms
+                first att_W, then tanh, then att_v
+                the output shape should be [batch*M, N=10, 1] where N is a result of conv
+            to get alpha (attention values), apply softmax on the output of linear layer
+                You could use F.softmax(). Be careful which dimension you apply softmax over
+            aggregate the conv output of x using the attention (alpha). denote this as *o*
+        """
+        ### BEGIN SOLUTION
         x = x.view(-1, self.T).unsqueeze(1)
         k_beat = k_beat.view(-1, self.T).unsqueeze(1)
-        # split length n=3000 into M=60 * K=50, x/k_beat:[128*60=7680,50]
 
-        ############################################
-        ### conv
-        ############################################
         x = F.relu(self.conv(x))  # Here number of filters K=64
-
         k_beat = F.relu(self.conv_k(k_beat))  # Conv1d(1, 1, kernel_size=(32,), stride=(2,)) => k_beat:[128*60,1,10].
-        ############################################
-        ### attention conv
-        ############################################
+
         x = x.permute(0, 2, 1)  # x:[128*60,10,64]
         k_beat = k_beat.permute(0, 2, 1)
         tmp_x = torch.cat((x, k_beat), dim=-1)
-        e = torch.matmul(tmp_x, self.W_att_cnn)
-        e = torch.matmul(torch.tanh(e), self.v_att_cnn)
+
+        e = self.att_v(torch.tanh(self.att_W(tmp_x)))
         alpha = F.softmax(e, 1)
-        x = torch.sum(torch.mul(alpha, x), 1)  # in the paper:o = sum_ \alpha * l
-        return x, alpha
+        o = torch.sum(torch.mul(alpha, x), 1)  # in the paper:o = sum_ \alpha * l
+        ### END SOLUTION
+        return o, alpha
 
 
 class AttnRhythm(nn.Module):
@@ -169,3 +198,6 @@ class NetFreq(nn.Module):
         ############################################
         att_dic['gama'] = gama
         return x, att_dic
+
+def test_model():
+    parameter_weights = None
