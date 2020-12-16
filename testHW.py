@@ -1,7 +1,5 @@
 from __future__ import print_function
 import torch
-import torch.optim as optim
-from tqdm import tqdm
 
 import numpy as np
 import os
@@ -10,6 +8,7 @@ from model import FreqNet
 from dataloader import main as get_dataloaders
 
 def train_model(model, train_dataloader, n_epoch=5, lr=0.003, device=None):
+    import torch.optim as optim
     """
     :param model: The instance of FreqNet that we are training
     :param train_dataloader: the DataLoader of the training data
@@ -31,6 +30,7 @@ def train_model(model, train_dataloader, n_epoch=5, lr=0.003, device=None):
     loss_history = []
 
     ### BEGIN SOLUTION
+    from tqdm import tqdm
     optimizer = optim.Adam(model.parameters(), lr=lr)
     loss_func = torch.nn.CrossEntropyLoss()
     for epoch in range(n_epoch):
@@ -64,6 +64,7 @@ def eval_model(model, dataloader, device=None):
     pred_all = []
     Y_test = []
     ### BEGIN SOLUTION
+    from tqdm import tqdm
     for (X, K_beat, K_rhythm, K_freq), Y in tqdm(dataloader, desc='test', ncols=80):
         X, K_beat, K_rhythm, K_freq, Y = X.to(device), K_beat.to(device), K_rhythm.to(device), K_freq.to(device), Y.to(device)
 
@@ -78,7 +79,7 @@ def eval_model(model, dataloader, device=None):
     return pred_all, Y_test
 
 
-def evaluate_results(truth, pred):
+def evaluate_predictions(truth, pred):
     """
     TODO: Evaluate the performance of the predictoin via AUROC, AUPRC, and F1 score
 
@@ -118,7 +119,7 @@ def main(data_path='../data/challenge2017/100_cached_data_permuted7', device=Non
 
 
     #=====Eval
-    auroc, auprc, f1 = evaluate_results(truth, pred)
+    auroc, auprc, f1 = evaluate_predictions(truth, pred)
     print(f"AUROC={auroc}, AUPRC={auprc}, F1={f1}")
 
     assert auroc > 0.85 and f1 > 0.8, "Performance is too low. Something's probably off."
@@ -130,6 +131,8 @@ def main(data_path='../data/challenge2017/100_cached_data_permuted7', device=Non
 import pickle as dill
 from util import evaluate
 from collections import Counter
+import torch.optim as optim
+from tqdm import tqdm
 def train(model, optimizer, loss_func, epoch, dataloader):
     """
     X_train: (n_channel, n_sample, n_dim)

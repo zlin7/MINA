@@ -1,17 +1,15 @@
 from __future__ import print_function
 import torch
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader
 import pandas as pd
 import os
 from torch.utils.data import Dataset
-import ipdb
-import numpy as np
 
 class ECGDataset(Dataset):
 
     def __init__(self, data_dict):
         """
-        TODO: init the Dataset instance
+        TODO: init the Dataset instance.
         """
         ### BEGIN SOLUTION
         self.X, self.Y, self.K_beat, self.K_thythm, self.K_freq = data_dict['X'], data_dict['Y'], data_dict['K_beat'], data_dict['K_rhythm'], data_dict['K_freq']
@@ -29,7 +27,8 @@ class ECGDataset(Dataset):
     def __getitem__(self, i):
         """
         TODO: Generates one sample of data
-            return the ((X, K_beat, K_rhythm, K_freq), Y) for the i-th
+            return the ((X, K_beat, K_rhythm, K_freq), Y) for the i-th data.
+            Be careful about which dimension you are indexing.
         """
 
         ### BEGIN SOLUTION
@@ -38,7 +37,7 @@ class ECGDataset(Dataset):
 
 def load_data(dataset, batch_size=128):
     """
-
+    Return a DataLoader instance basing on a Dataset instance, with batch_size specified.
     Note that since the data has already been shuffled, we set shuffle=False
     """
     def my_collate(batch):

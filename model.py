@@ -71,6 +71,28 @@ class KnowledgeAttn(nn.Module):
         return out, attn
 
 
+def float_tensor_equal(a, b, eps=1e-3):
+    return torch.norm(a-b).abs().max().tolist() < eps
+
+def testKnowledgeAttn():
+    m = KnowledgeAttn(2, 2)
+    m.att_W.weight.data = torch.tensor([[0.3298,  0.7045, -0.1067],
+                                        [0.9656,  0.3090,  1.2627]], requires_grad=True)
+    m.att_v.weight.data = torch.tensor([[-0.2368,  0.5824]], requires_grad=True)
+
+    x = torch.tensor([[[-0.6898, -0.9098], [0.0230,  0.2879], [-0.2534, -0.3190]],
+                      [[ 0.5412, -0.3434], [0.0289, -0.2837], [-0.4120, -0.7858]]])
+    k = torch.tensor([[ 0.5469,  0.3948, -1.1430], [0.7815, -1.4787, -0.2929]]).unsqueeze(2)
+    out, attn = m(x, k)
+
+    tout = torch.tensor([[-0.2817, -0.2531], [0.2144, -0.4387]])
+    tattn = torch.tensor([[[0.3482], [0.4475], [0.2043]],
+                          [[0.5696], [0.1894], [0.2410]]])
+    assert float_tensor_equal(attn, tattn), "The attention values are wrong"
+    assert float_tensor_equal(out, tout), "output of the attention module is wrong"
+
+
+#============================================================
 
 class BeatNet(nn.Module):
     #Attention for the CNN step/ beat level/local information
@@ -292,26 +314,6 @@ class FreqNet(nn.Module):
         ### END SOLUTION
         return out, gama
 
-
-def float_tensor_equal(a, b, eps=1e-3):
-    return torch.norm(a-b).abs().max().tolist() < eps
-
-def testKnowledgeAttn():
-    m = KnowledgeAttn(2, 2)
-    m.att_W.weight.data = torch.tensor([[0.3298,  0.7045, -0.1067],
-                                        [0.9656,  0.3090,  1.2627]], requires_grad=True)
-    m.att_v.weight.data = torch.tensor([[-0.2368,  0.5824]], requires_grad=True)
-
-    x = torch.tensor([[[-0.6898, -0.9098], [0.0230,  0.2879], [-0.2534, -0.3190]],
-                      [[ 0.5412, -0.3434], [0.0289, -0.2837], [-0.4120, -0.7858]]])
-    k = torch.tensor([[ 0.5469,  0.3948, -1.1430], [0.7815, -1.4787, -0.2929]]).unsqueeze(2)
-    out, attn = m(x, k)
-
-    tout = torch.tensor([[-0.2817, -0.2531], [0.2144, -0.4387]])
-    tattn = torch.tensor([[[0.3482], [0.4475], [0.2043]],
-                          [[0.5696], [0.1894], [0.2410]]])
-    assert float_tensor_equal(attn, tattn), "The attention values are wrong"
-    assert float_tensor_equal(out, tout), "output of the attention module is wrong"
 
 
 
