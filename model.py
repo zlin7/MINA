@@ -136,15 +136,17 @@ class BeatNet(nn.Module):
         :param x: shape (batch, n)
         :param k_beat: shape (batch, n)
         :return:
-            out: shape (batch * M, T)
+            out: shape (batch, M, self.conv_out_channels)
             alpha: shape (batch * M, N, 1) where N is a result of convolution
         TODO:
             reshape the data - convert x/k_beat of shape (batch, n) to (batch * M, 1, T), where n = MT
+                If you define the data carefully, you could use torch.Tensor.view() for all reshapes in this HW
             apply convolution on x and k_beat
                 pass the reshaped x through self.conv, and then ReLU
                 pass the reshaped k_beat through self.conv_k, and then ReLU
             (at this step, you might need to swap axes to align the dimensions depending on how you defined the layers)
             pass the conv'd x and conv'd knowledge through attn to get the output (*out*) and alpha
+            reshape the output *out* to be of shape (batch, M, self.conv_out_channels)
         """
         ### BEGIN SOLUTION
         x = x.view(-1, self.T).unsqueeze(1)
@@ -156,9 +158,21 @@ class BeatNet(nn.Module):
         x = x.permute(0, 2, 1)  # x:[128*60,10,64]
         k_beat = k_beat.permute(0, 2, 1)
         out, alpha = self.attn(x, k_beat)
+        out = out.view(-1, self.M, self.conv_out_channels)
         ### END SOLUTION
         return out, alpha
 
+def test_BeatNet():
+    _testm = BeatNet(12 * 34, 34, 56)
+    assert isinstance(_testm.conv, torch.nn.Conv1d) and isinstance(_testm.conv_k, torch.nn.Conv1d), "Should use nn.Conv1d"
+    assert _testm.conv.bias.shape == torch.Size([56]) and _testm.conv.weight.shape == torch.Size([56,1,32]), "conv definition is incorrect"
+    assert _testm.conv_k.bias.shape == torch.Size([1]) and _testm.conv_k.weight.shape == torch.Size([1, 1, 32]), "conv_k definition is incorrect"
+    assert isinstance(_testm.attn, KnowledgeAttn), "Should use one KnowledgeAttn Module"
+
+    _out, _alpha =_testm(torch.randn(37, 12*34), torch.randn(37, 12*34))
+    assert _alpha.shape == torch.Size([444,2,1]), "The attention's dimension is incorrect"
+    assert _out.shape==torch.Size([37, 12,56]), "The output's dimension is incorrect"
+    del _testm, _out, _alpha
 
 class RhythmNet(nn.Module):
     def __init__(self, n=3000, T=50, input_size=64, rhythm_out_size=8):
@@ -206,13 +220,13 @@ class RhythmNet(nn.Module):
 
     def forward(self, x, k_rhythm):
         """
-        :param x: shape (batch * M, self.input_size=T)
+        :param x: shape (batch, M, self.input_size)
         :param k_rhythm: shape (batch, M)
         :return:
             out: shape (batch, self.out_size)
             beta: shape (batch, M, 1)
         TODO:
-            reshape the data - convert x to of shape (batch, M, self.input_size), k_rhythm->(batch, M, 1)
+            reshape the k_rhythm->(batch, M, 1)
             pass the reshaped x through lstm
             pass the lstm output and knowledge through attn
             pass the result through fully connected layer - ReLU - Dropout
@@ -221,10 +235,8 @@ class RhythmNet(nn.Module):
 
         ### BEGIN SOLUTION
         ### reshape for rnn
-        self.batch_size = int(x.size()[0] / self.M)
-        x = x.view(self.batch_size, self.M, -1)
-        ### rnn
         k_rhythm = k_rhythm.unsqueeze(-1)  # [128, 60, 1]
+        ### rnn
         o, (ht, ct) = self.lstm(x)  # o:[batch,60,64] (in the paper this is called h
 
         x, beta = self.attn(o, k_rhythm)
@@ -233,6 +245,22 @@ class RhythmNet(nn.Module):
         out = self.do(x)
         ### END SOLUTION
         return out, beta
+
+
+def test_RhythmNet():
+    _B, _M, _T = 17, 23, 31
+    _testm = RhythmNet(_M * _T, _T, 37)
+    assert isinstance(_testm.lstm, torch.nn.LSTM), "Should use nn.LSTM"
+    assert _testm.lstm.bidirectional, "LSTM should be bidirectional"
+    assert isinstance(_testm.attn, KnowledgeAttn), "Should use one KnowledgeAttn Module"
+    assert isinstance(_testm.fc, nn.Linear) and _testm.fc.weight.shape == torch.Size([8,64]), "The fully connected is incorrect"
+    assert isinstance(_testm.do, nn.Dropout), "Dropout layer is not defined correctly"
+
+    _out, _beta = _testm(torch.randn(_B, _M, 37), torch.randn(_B, _M))
+    assert _beta.shape == torch.Size([_B,_M,1]), "The attention's dimension is incorrect"
+    assert _out.shape==torch.Size([_B, 8]), "The output's dimension is incorrect"
+    del _testm, _out, _beta,  _B, _M, _T
+
 
 class FreqNet(nn.Module):
     def __init__(self, n_channels=4, n=3000, T=50):
@@ -315,7 +343,17 @@ class FreqNet(nn.Module):
         return out, gama
 
 
+def test_FreqNet():
+    _B, _M, _T = 17, 59, 109
+    _testm = FreqNet(n=_M * _T, T=_T)
+    assert isinstance(_testm.attn, KnowledgeAttn), "Should use one KnowledgeAttn Module"
+    assert isinstance(_testm.fc, nn.Linear) and _testm.fc.weight.shape == torch.Size([2,8]), "The fully connected is incorrect"
+
+    _out, _gamma = _testm(torch.randn(4, _B, _M * _T), torch.randn(4, _B, _M * _T), torch.randn(4, _B, _M), torch.randn(4, _B, 1))
+    assert _gamma.shape == torch.Size([_B, 4, 1]), "The attention's dimension is incorrect"
+    assert _out.shape==torch.Size([_B, 2]), "The output's dimension is incorrect"
+    del _testm, _out, _gamma,  _B, _M, _T
 
 
 if __name__ == '__main__':
-    testKnowledgeAttn()
+    test_RhythmNet()

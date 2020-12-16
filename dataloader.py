@@ -73,4 +73,17 @@ def main(data_path=None):
 
     train_loader = load_data(ECGDataset(train_dict))
     test_loader = load_data(ECGDataset(test_dict))
+
+    #=========test:
+    assert len(train_loader.dataset) == 1696, "Length of training data incorrect."
+    assert len(test_loader.dataset) == 425, "Length of test data incorrect."
+    assert len(train_loader) == 14, "Length of the training dataloader incorrect - maybe check batch_size"
+    assert len(test_loader) == 4, "Length of the testing dataloader incorrect - maybe check batch_size"
+    assert [x.shape for x in train_loader.dataset[0][0]] == [(4,3000), (4,3000), (4,60), (4,1)], "Shapes of the data don't match. Check __getitem__ implementation"
+    assert [0, 1, 0, 0, 1, 0, 0, 1, 0, 1] == [test_loader.dataset[i][1] for i in range(10)], "Data seems permuted. Shuffle should be set to False"
+
+
     return train_loader, test_loader
+
+if __name__=='__main__':
+    main()
