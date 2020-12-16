@@ -72,7 +72,7 @@ class KnowledgeAttn(nn.Module):
 
 
 
-class AttnBeat(nn.Module):
+class BeatNet(nn.Module):
     #Attention for the CNN step/ beat level/local information
     def __init__(self, n=3000, T=50,
                  conv_out_channels=64):
@@ -87,7 +87,7 @@ class AttnBeat(nn.Module):
             2. an attention mechanism to aggregate the convolution outputs. Specifically:
                 attn: KnowledgeAttn with input_features equaling conv_out_channels, and attn_dim=att_cnn_dim
         """
-        super(AttnBeat, self).__init__()
+        super(BeatNet, self).__init__()
         self.n, self.M, self.T = n, int(n/T), T
         self.conv_out_channels = conv_out_channels
         self.conv_kernel_size = 32
@@ -138,7 +138,7 @@ class AttnBeat(nn.Module):
         return out, alpha
 
 
-class AttnRhythm(nn.Module):
+class RhythmNet(nn.Module):
     def __init__(self, n=3000, T=50, input_size=64, rhythm_out_size=8):
         """
         :param n: size of each 10-second-data
@@ -155,7 +155,7 @@ class AttnRhythm(nn.Module):
                 do: a Dropout layer with p=0.5
         """
         #input_size is the cnn_out_channels
-        super(AttnRhythm, self).__init__()
+        super(RhythmNet, self).__init__()
         self.n, self.M, self.T = n, int(n/T), T
         self.input_size = input_size
 
@@ -212,21 +212,21 @@ class AttnRhythm(nn.Module):
         ### END SOLUTION
         return out, beta
 
-class NetFreq(nn.Module):
+class FreqNet(nn.Module):
     def __init__(self, n_channels=4, n=3000, T=50):
         """
-        :param n_channels: number of channels (F in the paper). We will need to define this many AttnBeat & AttnRhythm nets.
+        :param n_channels: number of channels (F in the paper). We will need to define this many BeatNet & RhythmNet nets.
         :param n: size of each 10-second-data
         :param T: size of each smaller segment used to capture local information in the CNN stage
         TODO: This is the main network that orchestrates the previously defined attention modules:
-            1. define n_channels many AttnBeat and AttnRhythm modules. (Hint: use nn.ModuleList)
+            1. define n_channels many BeatNet and RhythmNet modules. (Hint: use nn.ModuleList)
                 beat_nets: for each beat_net, pass parameter conv_out_channel into the init()
                 rhythm_nets: for each rhythm_net, pass conv_out_channel as input_size, and self.rhythm_out_size as the output size
             2. define frequency (channel) level knowledge-guided attention module
                 attn: KnowledgeAttn with input_features equaling rhythm_out_size, and attn_dim=att_channel_dim
             3. output layer: a Linear layer for 2 classes output
         """
-        super(NetFreq, self).__init__()
+        super(FreqNet, self).__init__()
         self.n, self.M, self.T = n, int(n / T), T
         self.n_class = 2
         self.n_channels = n_channels
@@ -237,8 +237,8 @@ class NetFreq(nn.Module):
         self.beat_nets = nn.ModuleList()
         self.rhythm_nets = nn.ModuleList()
         for channel_i in range(self.n_channels):
-            self.beat_nets.append(AttnBeat(self.n, self.T, self.conv_out_channels))
-            self.rhythm_nets.append(AttnRhythm(self.n, self.T, self.conv_out_channels, self.rhythm_out_size))
+            self.beat_nets.append(BeatNet(self.n, self.T, self.conv_out_channels))
+            self.rhythm_nets.append(RhythmNet(self.n, self.T, self.conv_out_channels, self.rhythm_out_size))
         ### END SOLUTION
 
         ### frequency attention
@@ -292,5 +292,28 @@ class NetFreq(nn.Module):
         ### END SOLUTION
         return out, gama
 
-def test_model():
-    parameter_weights = None
+
+def float_tensor_equal(a, b, eps=1e-3):
+    return torch.norm(a-b).abs().max().tolist() < eps
+
+def testKnowledgeAttn():
+    m = KnowledgeAttn(2, 2)
+    m.att_W.weight.data = torch.tensor([[0.3298,  0.7045, -0.1067],
+                                        [0.9656,  0.3090,  1.2627]], requires_grad=True)
+    m.att_v.weight.data = torch.tensor([[-0.2368,  0.5824]], requires_grad=True)
+
+    x = torch.tensor([[[-0.6898, -0.9098], [0.0230,  0.2879], [-0.2534, -0.3190]],
+                      [[ 0.5412, -0.3434], [0.0289, -0.2837], [-0.4120, -0.7858]]])
+    k = torch.tensor([[ 0.5469,  0.3948, -1.1430], [0.7815, -1.4787, -0.2929]]).unsqueeze(2)
+    out, attn = m(x, k)
+
+    tout = torch.tensor([[-0.2817, -0.2531], [0.2144, -0.4387]])
+    tattn = torch.tensor([[[0.3482], [0.4475], [0.2043]],
+                          [[0.5696], [0.1894], [0.2410]]])
+    assert float_tensor_equal(attn, tattn), "The attention values are wrong"
+    assert float_tensor_equal(out, tout), "output of the attention module is wrong"
+
+
+
+if __name__ == '__main__':
+    testKnowledgeAttn()

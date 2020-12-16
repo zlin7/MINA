@@ -4,17 +4,132 @@ import torch.optim as optim
 from tqdm import tqdm
 
 import numpy as np
-import pickle as dill
-from collections import Counter
-from util import preprocess_physionet, make_data_physionet, make_knowledge_physionet, evaluate
 import os
 
-import model as new_model
-import dataloader as dld
-import old_model as old_model
-from importlib import reload
-reload(new_model); reload(old_model); reload(dld)
+from model import FreqNet
+from dataloader import main as get_dataloaders
 
+def train_model(model, train_dataloader, n_epoch=5, lr=0.003, device=None):
+    """
+    :param model: The instance of FreqNet that we are training
+    :param train_dataloader: the DataLoader of the training data
+    :param n_epoch: number of epochs to train
+    :return:
+        model: trained model
+        loss_history: recorded training loss history - should be just a list of float
+    TODO:
+        Specify the optimizer to be optim.Adam
+        Specify the loss function to be CrossEntropyLoss
+        Hint: to use dataloader, you can do:
+            for (X, K_beat, K_rhythm, K_freq), Y in train_dataloader:
+                ....
+
+    """
+    device = device or torch.device('cpu')
+    model.train()
+
+    loss_history = []
+
+    ### BEGIN SOLUTION
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+    loss_func = torch.nn.CrossEntropyLoss()
+    for epoch in range(n_epoch):
+        curr_epoch_loss = []
+        for (X, K_beat, K_rhythm, K_freq), Y in tqdm(train_dataloader, desc='train', ncols=80):
+            X, K_beat, K_rhythm, K_freq, Y = X.to(device), K_beat.to(device), K_rhythm.to(device), K_freq.to(device), Y.to(device)
+            pred, _ = model(X, K_beat, K_rhythm, K_freq)
+            loss = loss_func(pred, Y)
+            curr_epoch_loss.append(loss.cpu().data.numpy())
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+        print(f"epoch{epoch}: curr_epoch_loss={np.mean(curr_epoch_loss)}")
+        loss_history += curr_epoch_loss
+    ### END SOLUTION
+    return model, loss_history
+
+def eval_model(model, dataloader, device=None):
+    """
+    :return:
+        pred_all: prediction of model on the dataloder.
+            Should be an 2D numpy float array where the second dimension has length 2.
+        Y_test: truth labels. Should be an numpy array of ints
+    TODO:
+        evaluate the model using on the data in the dataloder.
+        Add all the prediction and truth to the corresponding list
+        Convert pred_all and Y_test to numpy arrays.
+    """
+    device = device or torch.device('cpu')
+    model.eval()
+    pred_all = []
+    Y_test = []
+    ### BEGIN SOLUTION
+    for (X, K_beat, K_rhythm, K_freq), Y in tqdm(dataloader, desc='test', ncols=80):
+        X, K_beat, K_rhythm, K_freq, Y = X.to(device), K_beat.to(device), K_rhythm.to(device), K_freq.to(device), Y.to(device)
+
+        pred, _ = model.forward(X, K_beat, K_rhythm, K_freq)
+
+        pred_all.append(pred.cpu().data.numpy())
+        Y_test.append(Y.cpu().data.numpy())
+    pred_all = np.concatenate(pred_all, axis=0)
+    Y_test = np.concatenate(Y_test, axis=0)
+    ### END SOLUTION
+
+    return pred_all, Y_test
+
+
+def evaluate_results(truth, pred):
+    """
+    TODO: Evaluate the performance of the predictoin via AUROC, AUPRC, and F1 score
+
+    each prediction in pred is a vector representing [p_0, p_1].
+    When defining the scores we are interesed in detecting class 1 only
+    (Hint: use roc_auc_score, average_precision_score, f1_score from sklearn.metrics)
+    return: auroc, auprc, f1
+    """
+    from sklearn.metrics import roc_auc_score, average_precision_score, f1_score
+
+    ### BEGIN SOLUTION
+    pred_label = []
+    for i in pred:
+        pred_label.append(np.argmax(i))
+    pred_label = np.array(pred_label)
+    auroc = roc_auc_score(truth, pred[:, 1])
+    auprc = average_precision_score(truth, pred[:, 1])
+    f1 = f1_score(truth, pred_label)
+    ### END SOLUTION
+
+    return auroc, auprc, f1
+
+def main(data_path='../data/challenge2017/100_cached_data_permuted7', device=None):
+    device = device or torch.device('cpu')
+    n_epoch = 5
+    lr = 0.003
+    n_channel = 4
+    n_dim=3000
+    T=50
+    train_loader, test_loader = get_dataloaders(data_path)
+
+    model = FreqNet(n_channel, n_dim, T)
+    model = model.to(device)
+
+    model, loss_history = train_model(model, train_loader, n_epoch=n_epoch, lr=lr, device=device)
+    pred, truth = eval_model(model, test_loader, device=device)
+
+
+    #=====Eval
+    auroc, auprc, f1 = evaluate_results(truth, pred)
+    print(f"AUROC={auroc}, AUPRC={auprc}, F1={f1}")
+
+    assert auroc > 0.85 and f1 > 0.8, "Performance is too low. Something's probably off."
+
+
+
+
+#=======================================The following were old, and thus not in the homework notebook
+import pickle as dill
+from util import evaluate
+from collections import Counter
 def train(model, optimizer, loss_func, epoch, dataloader):
     """
     X_train: (n_channel, n_sample, n_dim)
@@ -55,6 +170,8 @@ def train(model, optimizer, loss_func, epoch, dataloader):
     res.append(pred_all)
 
     return res
+
+
 
 
 def test(model, dataloader):
@@ -166,7 +283,7 @@ def load_permuted_data(data_path=r'G:\MINA\data\challenge2017\1000_cached_data_p
 
 def run_exp(data_path):
     #n_epoch = 200
-    n_epoch=5
+    n_epoch = 5
     lr = 0.003
     n_split = 50
     n_dim = 3000
@@ -183,7 +300,7 @@ def run_exp(data_path):
     ##################################################################
     ### read data
     ##################################################################
-    train_loader, test_loader = dld.main(data_path)
+    train_loader, test_loader = get_dataloaders(data_path)
     ##################################################################
     ### train
     ##################################################################
@@ -193,7 +310,7 @@ def run_exp(data_path):
 
     torch.cuda.manual_seed(0)
 
-    model = new_model.NetFreq(n_channel, n_dim, n_split)
+    model = FreqNet(n_channel, n_dim, n_split)
     model.cuda()
 
     optimizer = optim.Adam(model.parameters(), lr=lr)
@@ -229,6 +346,10 @@ def run_exp(data_path):
 
 
 if __name__ == '__main__':
+    np.random.seed(7)
+    torch.manual_seed(7)
+    torch.cuda.manual_seed(7)
+
     #run_exp('../data/challenge2017/')
-    run_exp('../data/challenge2017/100_cached_data_permuted7')
+    #run_exp('../data/challenge2017/100_cached_data_permuted7')
     #make_merged_data()
