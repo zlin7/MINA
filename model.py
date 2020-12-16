@@ -4,6 +4,74 @@ import torch.nn as nn
 import torch.nn.functional as F
 import ipdb
 
+class KnowledgeAttn(nn.Module):
+    def __init__(self, input_features, attn_dim):
+        """
+        This is the general knowledge-guided attention module.
+        It will transform the input and knowledge with 2 linear layers, computes attention, and then aggregate.
+        :param input_features: the number of features for each
+        :param attn_dim: the number of hidden nodes in the attention mechanism
+        TODO:
+            define the following 2 linear layers WITHOUT bias (with the names provided)
+                att_W: a Linear layer of shape (input_features + n_knowledge, attn_dim)
+                att_v: a Linear layer of shape (attn_dim, 1)
+            init the weights using self.init() (already given)
+        """
+        super(KnowledgeAttn, self).__init__()
+        self.input_features = input_features
+        self.attn_dim = attn_dim
+        self.n_knowledge = 1
+
+        ### BEGIN SOLUTION
+        self.att_W = nn.Linear(self.input_features + self.n_knowledge, self.attn_dim, bias=False)
+        self.att_v = nn.Linear(self.attn_dim, 1, bias=False)
+        ### END SOLUTION
+
+        self.init()
+
+    def init(self):
+        nn.init.normal_(self.att_W.weight)
+        nn.init.normal_(self.att_v.weight)
+
+    @classmethod
+    def attention_sum(cls, x, attn):
+        """
+
+        :param x: of shape (-1, D, nfeatures)
+        :param attn: of shape (-1, D, 1)
+        TODO: return the weighted sum of x along the middle axis with weights even in attn. output shoule be (-1, nfeatures)
+        """
+        ### BEGIN SOLUTION
+        return torch.sum(torch.mul(attn, x), 1)
+        ### END SOLUTION
+
+
+    def forward(self, x, k):
+        """
+        :param x: shape of (-1, D, input_features)
+        :param k: shape of (-1, D, 1)
+        :return:
+            out: shape of (-1, input_features), the aggregated x
+            attn: shape of (-1, D, 1)
+        TODO:
+            concatenate the input x and knowledge k together (on the last dimension)
+            pass the concatenated output through the learnable Linear transforms
+                first att_W, then tanh, then att_v
+                the output shape should be (-1, D, 1)
+            to get attention values, apply softmax on the output of linear layer
+                You could use F.softmax(). Be careful which dimension you apply softmax over
+            aggregate x using the attention values via self.attention_sum, and return
+        """
+        ### BEGIN SOLUTION
+        tmp = torch.cat([x, k], dim=-1)
+        e = self.att_v(torch.tanh(self.att_W(tmp)))
+        attn = F.softmax(e, 1)
+        out = self.attention_sum(x, attn)
+        ### END SOLUTION
+        return out, attn
+
+
+
 class AttnBeat(nn.Module):
     #Attention for the CNN step/ beat level/local information
     def __init__(self, n=3000, T=50,
@@ -17,8 +85,7 @@ class AttnBeat(nn.Module):
                 conv: The kernel size should be set to 32, and the number of filters should be set to *conv_out_channels*. Stride should be *conv_stride*
                 conv_k: same as conv, except that it has only 1 filter instead of *conv_out_channels*
             2. an attention mechanism to aggregate the convolution outputs. Specifically:
-                att_W_beat: a Linear layer of shape (conv_out_channels+1, att_cnn_dim), without bias
-                att_v_beat: a Linear layer of shape (att_cnn_dim, 1), without bias
+                attn: KnowledgeAttn with input_features equaling conv_out_channels, and attn_dim=att_cnn_dim
         """
         super(AttnBeat, self).__init__()
         self.n, self.M, self.T = n, int(n/T), T
@@ -39,14 +106,8 @@ class AttnBeat(nn.Module):
 
         self.att_cnn_dim = 8
         ### BEGIN SOLUTION
-        self.att_W_beat = nn.Linear(self.conv_out_channels + 1, self.att_cnn_dim, bias=False)
-        self.att_v_beat = nn.Linear(self.att_cnn_dim, 1, bias=False)
+        self.attn = KnowledgeAttn(self.conv_out_channels, self.att_cnn_dim)
         ### END SOLUTION
-        self.init()
-
-    def init(self):
-        nn.init.normal_(self.att_W_beat.weight)
-        nn.init.normal_(self.att_v_beat.weight)
 
     def forward(self, x, k_beat):
         """
@@ -60,14 +121,8 @@ class AttnBeat(nn.Module):
             apply convolution on x and k_beat
                 pass the reshaped x through self.conv, and then ReLU
                 pass the reshaped k_beat through self.conv_k, and then ReLU
-                concatenate the conv output of x and k_beat together
             (at this step, you might need to swap axes to align the dimensions depending on how you defined the layers)
-            pass the concatenated output trough the learnable Linear transforms
-                first att_W_beat, then tanh, then att_v_beat
-                the output shape should be [batch*M, N=10, 1] where N is a result of conv
-            to get alpha (attention values), apply softmax on the output of linear layer
-                You could use F.softmax(). Be careful which dimension you apply softmax over
-            aggregate the conv output of x using the attention (alpha). denote this as *out*
+            pass the conv'd x and conv'd knowledge through attn to get the output (*out*) and alpha
         """
         ### BEGIN SOLUTION
         x = x.view(-1, self.T).unsqueeze(1)
@@ -78,11 +133,7 @@ class AttnBeat(nn.Module):
 
         x = x.permute(0, 2, 1)  # x:[128*60,10,64]
         k_beat = k_beat.permute(0, 2, 1)
-        tmp_x = torch.cat((x, k_beat), dim=-1)
-
-        e = self.att_v_beat(torch.tanh(self.att_W_beat(tmp_x)))
-        alpha = F.softmax(e, 1)
-        out = torch.sum(torch.mul(alpha, x), 1)  # in the paper:o = sum_ \alpha * l
+        out, alpha = self.attn(x, k_beat)
         ### END SOLUTION
         return out, alpha
 
@@ -98,8 +149,7 @@ class AttnRhythm(nn.Module):
             1. use a bi-directional LSTM to process the learned local representations from the CNN part
                 lstm: bidirectional, 1 layer, batch_first, and hidden_size should be set to *rnn_hidden_size*
             2. an attention mechanism to aggregate the convolution outputs. Specifically:
-                att_W_rhythm: a Linear layer of shape (2 * self.rnn_hidden_size + 1, att_rnn_dim), without bias
-                att_v_rhythm: a Linear layer of shape (att_rnn_dim, 1), without bias
+                attn: KnowledgeAttn with input_features equaling lstm output, and attn_dim=att_rnn_dim
             3. output layers
                 fc: a Linear layer making the output of shape (..., self.out_size)
                 do: a Dropout layer with p=0.5
@@ -120,8 +170,7 @@ class AttnRhythm(nn.Module):
         ### Attention mechanism
         self.att_rnn_dim = 8
         ### BEGIN SOLUTION
-        self.att_W_rhythm = nn.Linear(2 * self.rnn_hidden_size + 1, self.att_rnn_dim, bias=False)
-        self.att_v_rhythm = nn.Linear(self.att_rnn_dim, 1, bias=False)
+        self.attn = KnowledgeAttn(2 * self.rnn_hidden_size, self.att_rnn_dim)
         ### END SOLUTION
 
         ### Dropout and fully connecte layers
@@ -131,11 +180,7 @@ class AttnRhythm(nn.Module):
         self.do = nn.Dropout(p=0.5)
         ### END SOLUTION
 
-        self.init()
 
-    def init(self):
-        nn.init.normal_(self.att_W_rhythm.weight)
-        nn.init.normal_(self.att_v_rhythm.weight)
 
     def forward(self, x, k_rhythm):
         """
@@ -147,12 +192,7 @@ class AttnRhythm(nn.Module):
         TODO:
             reshape the data - convert x to of shape (batch, M, self.input_size), k_rhythm->(batch, M, 1)
             pass the reshaped x through lstm
-            concatenate the lstm output and k_rhythm together (on the last dimension)
-            pass the concatenated output trough the learnable Linear transforms
-                first att_W_rhythm, then tanh, then att_v_rhythm
-                the output shape should be [batch, M, 1]
-            to get beta (attention values), apply softmax on the output of linear layer
-            aggregate the lstm output of x using the attention (beta).
+            pass the lstm output and knowledge through attn
             pass the result through fully connected layer - ReLU - Dropout
             denote the final output as *out*
         """
@@ -164,10 +204,8 @@ class AttnRhythm(nn.Module):
         ### rnn
         k_rhythm = k_rhythm.unsqueeze(-1)  # [128, 60, 1]
         o, (ht, ct) = self.lstm(x)  # o:[batch,60,64] (in the paper this is called h
-        tmp_o = torch.cat((o, k_rhythm), dim=-1)
-        e = self.att_v_rhythm(torch.tanh(self.att_W_rhythm(tmp_o)))
-        beta = F.softmax(e, 1)  # [128,60,1]
-        x = torch.sum(torch.mul(beta, o), 1)
+
+        x, beta = self.attn(o, k_rhythm)
         ### fc and Dropout
         x = F.relu(self.fc(x))  # [128, 64->8]
         out = self.do(x)
@@ -184,9 +222,8 @@ class NetFreq(nn.Module):
             1. define n_channels many AttnBeat and AttnRhythm modules. (Hint: use nn.ModuleList)
                 beat_nets: for each beat_net, pass parameter conv_out_channel into the init()
                 rhythm_nets: for each rhythm_net, pass conv_out_channel as input_size, and self.rhythm_out_size as the output size
-            2. define frequency (channel) level attention layers
-                att_W_freq: a Linear layer of shape (rhythm_out_size+1, att_channel_dim), without bias
-                att_v_freq: a Linear layer of shape (att_channel_dim, 1), without bias
+            2. define frequency (channel) level knowledge-guided attention module
+                attn: KnowledgeAttn with input_features equaling rhythm_out_size, and attn_dim=att_channel_dim
             3. output layer: a Linear layer for 2 classes output
         """
         super(NetFreq, self).__init__()
@@ -207,8 +244,7 @@ class NetFreq(nn.Module):
         ### frequency attention
         self.att_channel_dim = 2
         ### BEGIN SOLUTION
-        self.att_W_freq = nn.Linear(self.rhythm_out_size + 1, self.att_channel_dim, bias=False)
-        self.att_v_freq = nn.Linear(self.att_channel_dim, 1, bias=False)
+        self.attn = KnowledgeAttn(self.rhythm_out_size, self.att_channel_dim)
         ### END SOLUTION
 
         ### fully-connected output layer
@@ -216,11 +252,6 @@ class NetFreq(nn.Module):
         self.fc = nn.Linear(self.rhythm_out_size, self.n_class)
         ### END SOLUTION
 
-        self.init()
-
-    def init(self):
-        nn.init.normal_(self.att_W_freq.weight)
-        nn.init.normal_(self.att_v_freq.weight)
 
     def forward(self, x, k_beats, k_rhythms, k_freq):
         """
@@ -237,9 +268,9 @@ class NetFreq(nn.Module):
             1. pass each channel of x through the corresponding beat_net, then rhythm_net.
                 We will discard the attention (alpha and beta) outputs for now
             2. stack the output from 1 together into a tensor of shape (batch, n_channels, rhythm_out_size)
-            3. stack the result from 2 with k_freq, and pass it through att_W_freq, tanh, att_v_freq like before
-            4. apply softmax to get attention gamma, and then aggregate result from 2 using gamma
-            5. pass result from 4 through the final fully connected layer, and then softmax to normalize
+            3. pass result from 2 and k_freq through attention module, to get the aggregated result and gama
+            4. pass aggregated result from 3 through the final fully connected layer.
+            5. Apply Softmax to normalize output to a probability distribution (over 2 classes)
         """
         ### BEGIN SOLUTION
         new_x = [None for _ in range(self.n_channels)]
@@ -251,11 +282,7 @@ class NetFreq(nn.Module):
 
         # ### attention on channel
         k_freq = k_freq.permute(1, 0, 2) #[4,128,1] -> [128,4,1]
-
-        tmp_x = torch.cat((x, k_freq), dim=-1)
-        e = self.att_v_freq(torch.tanh(self.att_W_freq(tmp_x)))
-        gama = F.softmax(e, 1) #[batch, 4, 1]
-        x = torch.sum(torch.mul(gama, x), 1)
+        x, gama = self.attn(x, k_freq)
 
         ### fc
         out = F.softmax(self.fc(x), 1)
