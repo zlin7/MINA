@@ -33,7 +33,7 @@ def train(model, optimizer, loss_func, epoch, dataloader):
         X, K_beat, K_rhythm, K_freq = X.cuda(), K_beat.cuda(), K_rhythm.cuda(), K_freq.cuda()
         Y = Y.cuda()
 
-        pred, _ = model.forward_(X, K_beat, K_rhythm, K_freq)
+        pred, _ = model.forward(X, K_beat, K_rhythm, K_freq)
 
         pred_all.append(pred.cpu().data.numpy())
         Y_train.append(Y.cpu().data.numpy())
@@ -61,17 +61,13 @@ def test(model, dataloader):
     model.eval()
 
     pred_all = []
-    att_dic_all = []
     Y_test = []
     for (X, K_beat, K_rhythm, K_freq), Y in tqdm(dataloader, desc='test', ncols=80):
         X, K_beat, K_rhythm, K_freq = X.cuda(), K_beat.cuda(), K_rhythm.cuda(), K_freq.cuda()
         Y = Y.cuda()
 
-        pred, att_dic = model.forward_(X, K_beat, K_rhythm, K_freq)
+        pred, _ = model.forward(X, K_beat, K_rhythm, K_freq)
 
-        for k, v in att_dic.items():
-            att_dic[k] = v.cpu().data.numpy()
-        att_dic_all.append(att_dic)
         pred_all.append(pred.cpu().data.numpy())
         Y_test.append(Y.cpu().data.numpy())
 
@@ -81,7 +77,7 @@ def test(model, dataloader):
     res = evaluate(Y_test, pred_all)
     res.append(pred_all)
 
-    return res, att_dic_all
+    return res
 
 def load_data(data_path=r"G:\MINA\data\challenge2017"):
     ##################################################################
@@ -205,14 +201,12 @@ def run_exp(data_path):
 
     train_res_list = []
     test_res_list = []
-    test_att_list = []
     for epoch in range(n_epoch):
         tmp_train = train(model, optimizer, loss_func, epoch, train_loader)
-        tmp_test, tmp_att_test = test(model, test_loader)
+        tmp_test = test(model, test_loader)
 
         train_res_list.append(tmp_train)
         test_res_list.append(tmp_test)
-        test_att_list.append(tmp_att_test)
 
     ##################################################################
     ### save results
@@ -232,13 +226,6 @@ def run_exp(data_path):
         dill.dump(res, fout)
 
     np.savetxt('{0}/res_mat.csv'.format(directory), res_mat, delimiter=',')
-
-    try:
-        res = {'test_att_list': test_att_list}
-        with open('{0}/res_att.pkl'.format(directory), 'wb') as fout:
-            dill.dump(res, fout)
-    except:
-        print('error in saving attention file')
 
 
 if __name__ == '__main__':

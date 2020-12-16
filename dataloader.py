@@ -56,7 +56,7 @@ def load_data(dataset, batch_size=128):
         K_rhythm = torch.tensor([[_x[0][2][c] for _x in batch] for c in range(4)], dtype=torch.float)
         K_freq = torch.tensor([[_x[0][3][c] for _x in batch] for c in range(4)], dtype=torch.float)
         Y = torch.tensor([_x[1] for _x in batch], dtype=torch.long)
-        ### BEGIN SOLUTION
+        ### END SOLUTION
         return (X, K_beat, K_rhythm, K_freq), Y
 
     return torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False, collate_fn=my_collate)
